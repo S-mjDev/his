@@ -1,0 +1,16 @@
+{
+    "admin": {
+        "username": "admin",
+        "password": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
+        "role": "Administrator",
+        "created_date": "2026-05-07 11:26:39",
+        "last_login": "2026-05-07 11:29:38"
+    },
+    "er2026": {
+        "username": "er2026",
+        "password": "9ba4634da71916fc6256d79a8bbbb0573375735c1d5a9fbfec8cac448b255668",
+        "role": "Staff",
+        "created_date": "2026-05-07 11:30:07",
+        "last_login": "2026-05-07 11:30:36"
+    }
+}
