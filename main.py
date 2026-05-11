@@ -68,6 +68,8 @@ class DatabaseConnection:
             last_login DATETIME NULL
         )
         """
+
+  
         
         # Create patients table
         patients_table = """
@@ -75,9 +77,13 @@ class DatabaseConnection:
             id INT AUTO_INCREMENT PRIMARY KEY,
             patient_id VARCHAR(20) UNIQUE NOT NULL,
             first_name VARCHAR(50) NOT NULL,
+            middle_name VARCHAR(50) NOT NULL,
             last_name VARCHAR(50) NOT NULL,
             age INT,
             gender VARCHAR(10),
+            birth_date DATE,
+            birth_place VARCHAR(100),
+            civil_status VARCHAR(20),
             phone VARCHAR(15),
             email VARCHAR(100),
             address TEXT,
@@ -553,17 +559,22 @@ class PatientDatabase:
     def add_patient(self, patient_id, data):
         """Add a new patient to the database"""
         insert_query = """
-        INSERT INTO patients (patient_id, first_name, last_name, age, gender, phone, email, address, medical_history, registration_date) 
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        INSERT INTO patients (patient_id, first_name, middle_name, last_name, age, gender, birth_date, birth_place, civil_status, phone, email, address, medical_history, registration_date) 
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
         """
         
+        birth_date_value = data.get('birth_date') or None
         try:
             self.db.execute_query(insert_query, (
                 patient_id,
                 data.get('first_name', ''),
+                data.get('middle_name', ''),
                 data.get('last_name', ''),
                 data.get('age', ''),
                 data.get('gender', ''),
+                birth_date_value,
+                data.get('birth_place', ''),
+                data.get('civil_status', ''),
                 data.get('phone', ''),
                 data.get('email', ''),
                 data.get('address', ''),
@@ -587,14 +598,18 @@ class PatientDatabase:
                     'id': result[0],
                     'patient_id': result[1],
                     'first_name': result[2],
-                    'last_name': result[3],
-                    'age': result[4],
-                    'gender': result[5],
-                    'phone': result[6],
-                    'email': result[7],
-                    'address': result[8],
-                    'medical_history': result[9],
-                    'registration_date': str(result[10])
+                    'middle_name': result[3],
+                    'last_name': result[4],
+                    'age': result[5],
+                    'gender': result[6],
+                    'birth_date': result[7],
+                    'birth_place': result[8],
+                    'civil_status': result[9],
+                    'phone': result[10],
+                    'email': result[11],
+                    'address': result[12],
+                    'medical_history': result[13],
+                    'registration_date': str(result[14])
                 }
         return None
     
@@ -611,14 +626,18 @@ class PatientDatabase:
                     'id': row[0],
                     'patient_id': row[1],
                     'first_name': row[2],
-                    'last_name': row[3],
-                    'age': row[4],
-                    'gender': row[5],
-                    'phone': row[6],
-                    'email': row[7],
-                    'address': row[8],
-                    'medical_history': row[9],
-                    'registration_date': str(row[10])
+                    'middle_name': row[3],
+                    'last_name': row[4],
+                    'age': row[5],
+                    'gender': row[6],
+                    'birth_date': str(row[7]),
+                    'birth_place': row[8],
+                    'civil_status': row[9],
+                    'phone': row[10],
+                    'email': row[11],
+                    'address': row[12],
+                    'medical_history': row[13],
+                    'registration_date': str(row[14]),
                 }
         return patients
     
@@ -627,6 +646,24 @@ class PatientDatabase:
         query = "SELECT COUNT(*) FROM patients WHERE patient_id = %s"
         cursor = self.db.execute_query(query, (patient_id,))
         
+        if cursor:
+            return cursor.fetchone()[0] > 0
+        return False
+
+    def has_duplicate_patient(self, data):
+        """Check if a patient with the same name, birth date, phone, or email already exists."""
+        conditions = []
+        params = []
+
+        if data.get('first_name') and data.get('last_name') and data.get('birth_date'):
+            conditions.append("(first_name = %s AND last_name = %s AND birth_date <=> %s)")
+            params.extend([data['first_name'], data['last_name'], data['birth_date']])
+
+        if not conditions:
+            return False
+
+        query = f"SELECT COUNT(*) FROM patients WHERE {' OR '.join(conditions)}"
+        cursor = self.db.execute_query(query, tuple(params))
         if cursor:
             return cursor.fetchone()[0] > 0
         return False
@@ -647,6 +684,13 @@ def validate_age(age):
     except ValueError:
         return False
 
+def validate_date(date_text):
+    try:
+        datetime.strptime(date_text, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
 def validate_username(username):
     """Validate username: 3-20 chars, alphanumeric + underscore only"""
     if not username or len(username) < 3 or len(username) > 20:
@@ -662,7 +706,7 @@ def open_patient_registration():
     reg_window = Toplevel(window)
     reg_window.title("Patient Registration")
     reg_window.geometry("500x700")
-    reg_window.resizable(False, False)
+    reg_window.resizable(True, True)
     
     db = PatientDatabase()
     
@@ -683,60 +727,88 @@ def open_patient_registration():
     next_id = db.generate_next_patient_id()
     patient_id_label.config(text=next_id)
     
-    # Full Name
-    Label(main_frame, text="Full Name:", font=("Arial", 11, "bold")).grid(row=1, column=0, sticky=W, pady=10)
+    # First Name
+    Label(main_frame, text="First Name:", font=("Arial", 11, "bold")).grid(row=1, column=0, sticky=W, pady=10)
     name_entry = Entry(main_frame, width=30, font=("Arial", 11))
     name_entry.grid(row=1, column=1, padx=10, pady=10)
-    
+  
+    # Middle Name
+    Label(main_frame, text="Middle Name:", font=("Arial", 11, "bold")).grid(row=2, column=0, sticky=W, pady=10)
+    middle_name_entry = Entry(main_frame, width=30, font=("Arial", 11))
+    middle_name_entry.grid(row=2, column=1, padx=10, pady=10)
+
+    # Last Name
+    Label(main_frame, text="Last Name:", font=("Arial", 11, "bold")).grid(row=3, column=0, sticky=W, pady=10)
+    last_name_entry = Entry(main_frame, width=30, font=("Arial", 11))
+    last_name_entry.grid(row=3, column=1, padx=10, pady=10)
+
     # Age
-    Label(main_frame, text="Age:", font=("Arial", 11, "bold")).grid(row=2, column=0, sticky=W, pady=10)
+    Label(main_frame, text="Age:", font=("Arial", 11, "bold")).grid(row=4, column=0, sticky=W, pady=10)
     age_entry = Entry(main_frame, width=30, font=("Arial", 11))
-    age_entry.grid(row=2, column=1, padx=10, pady=10)
+    age_entry.grid(row=4, column=1, padx=10, pady=10)
     
     # Gender
-    Label(main_frame, text="Gender:", font=("Arial", 11, "bold")).grid(row=3, column=0, sticky=W, pady=10)
+    Label(main_frame, text="Gender:", font=("Arial", 11, "bold")).grid(row=5, column=0, sticky=W, pady=10)
     gender_var = StringVar(value="Male")
     gender_combo = ttk.Combobox(main_frame, textvariable=gender_var, values=["Male", "Female", "Other"], width=27, state="readonly")
-    gender_combo.grid(row=3, column=1, padx=10, pady=10)
+    gender_combo.grid(row=5, column=1, padx=10, pady=10)
+
+    # Birth Date
+    Label(main_frame, text="Birth Date (YYYY-MM-DD):", font=("Arial", 11, "bold")).grid(row=6, column=0, sticky=W, pady=10)
+    birth_date_entry = Entry(main_frame, width=30, font=("Arial", 11))
+    birth_date_entry.grid(row=6, column=1, padx=10, pady=10)
+
+    # Birth Place
+    Label(main_frame, text="Birth Place:", font=("Arial", 11, "bold")).grid(row=7, column=0, sticky=W, pady=10)
+    birth_place_entry = Entry(main_frame, width=30, font=("Arial", 11))
+    birth_place_entry.grid(row=7, column=1, padx=10, pady=10)
+
+    # Civil Status
+    Label(main_frame, text="Civil Status:", font=("Arial", 11, "bold")).grid(row=8, column=0, sticky=W, pady=10)
+    civil_status_var = StringVar(value="Single")
+    civil_status_combo = ttk.Combobox(main_frame, textvariable=civil_status_var, values=["Single", "Married", "Widowed", "Divorced"], width=27, state="readonly")
+    civil_status_combo.grid(row=8, column=1, padx=10, pady=10)
     
     # Phone Number
-    Label(main_frame, text="Phone Number:", font=("Arial", 11, "bold")).grid(row=4, column=0, sticky=W, pady=10)
+    Label(main_frame, text="Phone Number:", font=("Arial", 11, "bold")).grid(row=9, column=0, sticky=W, pady=10)
     phone_entry = Entry(main_frame, width=30, font=("Arial", 11))
-    phone_entry.grid(row=4, column=1, padx=10, pady=10)
-    phone_entry.insert(0, "10 digits required")
+    phone_entry.grid(row=9, column=1, padx=10, pady=10)
     
     # Email
-    Label(main_frame, text="Email:", font=("Arial", 11, "bold")).grid(row=5, column=0, sticky=W, pady=10)
+    Label(main_frame, text="Email:", font=("Arial", 11, "bold")).grid(row=10, column=0, sticky=W, pady=10)
     email_entry = Entry(main_frame, width=30, font=("Arial", 11))
-    email_entry.grid(row=5, column=1, padx=10, pady=10)
+    email_entry.grid(row=10, column=1, padx=10, pady=10)
     
     # Address
-    Label(main_frame, text="Address:", font=("Arial", 11, "bold")).grid(row=6, column=0, sticky=W, pady=10)
+    Label(main_frame, text="Address:", font=("Arial", 11, "bold")).grid(row=11, column=0, sticky=W, pady=10)
     address_entry = Entry(main_frame, width=30, font=("Arial", 11))
-    address_entry.grid(row=6, column=1, padx=10, pady=10)
+    address_entry.grid(row=11, column=1, padx=10, pady=10)
     
     # Medical Conditions
-    Label(main_frame, text="Medical Conditions:", font=("Arial", 11, "bold")).grid(row=7, column=0, sticky=NW, pady=10)
+    Label(main_frame, text="Medical Conditions:", font=("Arial", 11, "bold")).grid(row=12, column=0, sticky=NW, pady=10)
     conditions_entry = Text(main_frame, width=30, height=3, font=("Arial", 11))
-    conditions_entry.grid(row=7, column=1, padx=10, pady=10)
+    conditions_entry.grid(row=12, column=1, padx=10, pady=10)
     
     # Medications
-    Label(main_frame, text="Current Medications:", font=("Arial", 11, "bold")).grid(row=8, column=0, sticky=NW, pady=10)
+    Label(main_frame, text="Current Medications:", font=("Arial", 11, "bold")).grid(row=13, column=0, sticky=NW, pady=10)
     medications_entry = Text(main_frame, width=30, height=3, font=("Arial", 11))
-    medications_entry.grid(row=8, column=1, padx=10, pady=10)
+    medications_entry.grid(row=13, column=1, padx=10, pady=10)
     
     # Emergency Contact
-    Label(main_frame, text="Emergency Contact:", font=("Arial", 11, "bold")).grid(row=9, column=0, sticky=W, pady=10)
+    Label(main_frame, text="Emergency Contact:", font=("Arial", 11, "bold")).grid(row=14, column=0, sticky=W, pady=10)
     emergency_entry = Entry(main_frame, width=30, font=("Arial", 11))
-    emergency_entry.grid(row=9, column=1, padx=10, pady=10)
+    emergency_entry.grid(row=14, column=1, padx=10, pady=10)
     
-    def register_patient():
+    def register_patient(force=False):
         # Get auto-generated patient ID
         patient_id = patient_id_label.cget("text")
         
         # Validation
-        if not name_entry.get().strip():
-            messagebox.showerror("Error", "Full Name is required")
+        first_name = name_entry.get().strip()
+        middle_name = middle_name_entry.get().strip()
+        last_name = last_name_entry.get().strip()
+        if not first_name or not last_name:
+            messagebox.showerror("Error", "First Name and Last Name are required")
             return
         
         if not validate_age(age_entry.get()):
@@ -751,25 +823,44 @@ def open_patient_registration():
             messagebox.showerror("Error", "Please enter a valid email address")
             return
         
+        birth_date_value = birth_date_entry.get().strip()
+        if birth_date_value and not validate_date(birth_date_value):
+            messagebox.showerror("Error", "Please enter a valid birth date in YYYY-MM-DD format")
+            return
+
         # Create patient record
-        full_name = name_entry.get().strip()
-        name_parts = full_name.split(maxsplit=1)
-        first_name = name_parts[0] if len(name_parts) > 0 else ""
-        last_name = name_parts[1] if len(name_parts) > 1 else ""
-        
         patient_data = {
             "first_name": first_name,
+            "middle_name": middle_name,
             "last_name": last_name,
             "age": age_entry.get(),
             "gender": gender_var.get(),
+            "birth_date": birth_date_value or None,
+            "birth_place": birth_place_entry.get().strip(),
+            "civil_status": civil_status_var.get(),
             "phone": phone_entry.get(),
             "email": email_entry.get(),
             "address": address_entry.get(),
             "medical_history": conditions_entry.get("1.0", END).strip()
         }
-        
+
+        if not force and db.has_duplicate_patient(patient_data):
+            messagebox.showwarning(
+                "Duplicate Patient",
+                "A patient with the same name/birth date/phone/email already exists.\n"
+                "Use Save Anyway to continue regardless."
+            )
+            return
+
+        if force:
+            if not messagebox.askyesno(
+                "Confirm Save Anyway",
+                "A duplicate patient was detected. Are you sure you want to save this record anyway?"
+            ):
+                return
+
         db.add_patient(patient_id, patient_data)
-        messagebox.showinfo("Success", f"Patient {name_entry.get()} registered successfully!\nPatient ID: {patient_id}")
+        messagebox.showinfo("Success", f"Patient {first_name} {last_name} registered successfully!\nPatient ID: {patient_id}")
         
         # Generate new patient ID for next registration
         next_id = db.generate_next_patient_id()
@@ -777,11 +868,18 @@ def open_patient_registration():
         
         # Clear form
         name_entry.delete(0, END)
+        middle_name_entry.delete(0, END)
+        last_name_entry.delete(0, END)
         age_entry.delete(0, END)
         phone_entry.delete(0, END)
         email_entry.delete(0, END)
         address_entry.delete(0, END)
         conditions_entry.delete("1.0", END)
+        medications_entry.delete("1.0", END)
+        emergency_entry.delete(0, END)
+
+    def save_anyway():
+        register_patient(force=True)
     
     # Button Frame
     button_frame = Frame(reg_window)
@@ -790,6 +888,10 @@ def open_patient_registration():
     register_btn = Button(button_frame, text="Register Patient", command=register_patient, 
                          bg="green", fg="white", font=("Arial", 12, "bold"), width=20, padx=10, pady=10)
     register_btn.pack(side=LEFT, padx=5)
+
+    save_anyway_btn = Button(button_frame, text="Save Anyway", command=save_anyway,
+                             bg="orange", fg="white", font=("Arial", 12, "bold"), width=20, padx=10, pady=10)
+    save_anyway_btn.pack(side=LEFT, padx=5)
     
     close_btn = Button(button_frame, text="Close", command=reg_window.destroy, 
                       bg="red", fg="white", font=("Arial", 12, "bold"), width=20, padx=10, pady=10)
@@ -902,7 +1004,7 @@ def open_patient_list():
     
     # Define headings
     tree.heading("ID", text="Patient ID")
-    tree.heading("Name", text="Full Name")
+    tree.heading("Name", text="Name")
     tree.heading("Age", text="Age")
     tree.heading("Gender", text="Gender")
     tree.heading("Phone", text="Phone")
@@ -947,12 +1049,13 @@ def open_patient_list():
             return
         
         for patient_id, patient_data in patients.items():
-            first_name = patient_data.get('first_name', '')
-            last_name = patient_data.get('last_name', '')
-            full_name = f"{first_name} {last_name}".strip()
+            first = patient_data.get('first_name', '')
+            middle = patient_data.get('middle_name', '')
+            last = patient_data.get('last_name', '')
+            full_name = f"{last}, {first}".strip().replace(" ,", "")
             tree.insert("", END, values=(
                 patient_id,
-                full_name if full_name else 'N/A',
+                full_name,
                 patient_data.get('age', 'N/A'),
                 patient_data.get('gender', 'N/A'),
                 patient_data.get('phone', 'N/A'),
@@ -975,8 +1078,9 @@ def open_patient_list():
                 details_text.delete(1.0, END)
                 details_text.insert(END, f"Patient ID: {patient_id}\n")
                 first_name = patient_data.get('first_name', '')
+                middle_name = patient_data.get('middle_name', '')
                 last_name = patient_data.get('last_name', '')
-                full_name = f"{first_name} {last_name}".strip()
+                full_name = f"{first_name}, {middle_name}, {last_name}".strip()
                 details_text.insert(END, f"Name: {full_name if full_name else 'N/A'}\n")
                 details_text.insert(END, f"Age: {patient_data.get('age', 'N/A')}\n")
                 details_text.insert(END, f"Gender: {patient_data.get('gender', 'N/A')}\n")
