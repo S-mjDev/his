@@ -6,6 +6,9 @@ from datetime import datetime
 import re
 import hashlib
 import mysql.connector
+# FORCE PYINSTALLER TO TRACK THE AUTHENTICATION PLUGINS
+from mysql.connector.plugins import mysql_native_password
+from mysql.connector.plugins import caching_sha2_password
 from mysql.connector import Error
 
 # ============== DATABASE CONFIGURATION ==============
@@ -16,6 +19,9 @@ class DatabaseConnection:
         self.user = "root"
         self.password = "root"
         self.connection = None
+
+
+
     
     def connect(self):
         """Establish database connection"""
@@ -24,7 +30,9 @@ class DatabaseConnection:
                 host=self.host,
                 database=self.database,
                 user=self.user,
-                password=self.password
+                password=self.password,
+                auth_plugin='mysql_native_password',
+                use_pure=True
             )
             if self.connection.is_connected():
                 return True
@@ -419,7 +427,7 @@ def open_user_management():
             tree.delete(item)
         
         user_db = UserDatabase()
-        users = user_db.users
+        users = user_db.get_all_users()
         
         if not users:
             tree.insert("", END, values=("No users", "found", ""))
@@ -444,7 +452,7 @@ def open_user_management():
                 return
             
             user_db = UserDatabase()
-            user_data = user_db.users.get(username)
+            user_data = user_db.get_all_users().get(username)
             if user_data:
                 details_text.delete(1.0, END)
                 details_text.insert(END, f"Username: {username}\n")
