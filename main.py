@@ -30,10 +30,10 @@ def resource_path(relative_path):
 class DatabaseConnection:
     # Initialize the instance.
     def __init__(self):
-        self.host = os.getenv("DB_HOST", "192.168.1.88")
-        self.database = os.getenv("DB_NAME", "his_db")
-        self.user = os.getenv("DB_USER", "root")
-        self.password = os.getenv("DB_PASSWORD", "root")
+        self.host = "localhost"
+        self.database = "his_db"
+        self.user = "root"
+        self.password = ""
         self.connection = None
 
 
@@ -222,7 +222,62 @@ class UserDatabase:
                     'last_login': str(row[5]) if row[5] else None
                 }
         return users
-    
+
+    # Retrieve a single user account by username.
+    def get_user(self, username):
+        query = "SELECT * FROM users WHERE username = %s"
+        cursor = self.db.execute_query(query, (username,))
+        if cursor:
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'username': row[1],
+                    'password': row[2],
+                    'role': row[3],
+                    'created_date': str(row[4]),
+                    'last_login': str(row[5]) if row[5] else None
+                }
+        return None
+
+    # Update a user role and/or password.
+    def update_user(self, username, role=None, password=None):
+        if role is None and password is None:
+            return False
+
+        fields = []
+        params = []
+        if role is not None:
+            fields.append("role = %s")
+            params.append(role)
+        if password is not None:
+            fields.append("password = %s")
+            params.append(self.hash_password(password))
+
+        params.append(username)
+        query = f"UPDATE users SET {', '.join(fields)} WHERE username = %s"
+
+        try:
+            cursor = self.db.execute_query(query, tuple(params))
+            if cursor and cursor.rowcount > 0:
+                self.db.commit()
+                return True
+        except Error as e:
+            print(f"Error updating user: {e}")
+        return False
+
+    # Delete a user account from the database.
+    def delete_user(self, username):
+        query = "DELETE FROM users WHERE username = %s"
+        try:
+            cursor = self.db.execute_query(query, (username,))
+            if cursor and cursor.rowcount > 0:
+                self.db.commit()
+                return True
+        except Error as e:
+            print(f"Error deleting user: {e}")
+        return False
+
     # Create a default administrator account if none exists.
     def create_default_admin(self):
         """Create default admin user if not exists"""
@@ -660,6 +715,49 @@ def build_user_management_page(parent):
     lbl_cdate = detail_row("Created")
     lbl_login = detail_row("Last Login")
 
+    role_var = StringVar(value="Staff")
+    selected_username = StringVar(value="")
+
+    edit_section = Frame(detail_body, bg=T["bg"], pady=8)
+    edit_section.pack(fill=X, padx=(10, 0), pady=(10, 0))
+
+    Label(edit_section, text="Edit Account", font=FONT["tag"],
+          bg=T["bg"], fg=T["muted"]).pack(anchor=W, pady=(0, 6))
+
+    form = Frame(edit_section, bg=T["bg"])
+    form.pack(fill=X)
+    form.columnconfigure(1, weight=1)
+
+    Label(form, text="Role", font=FONT["tag"], bg=T["bg"], fg=T["muted"]).grid(
+        row=0, column=0, sticky=W, pady=(0, 6), padx=(0, 12))
+    role_combo = mk_combo(form, role_var, ["Staff", "Administrator"], width=24)
+    role_combo.grid(row=0, column=1, sticky=EW, pady=(0, 6))
+
+    Label(form, text="New Password", font=FONT["tag"], bg=T["bg"], fg=T["muted"]).grid(
+        row=1, column=0, sticky=W, pady=(0, 6), padx=(0, 12))
+    password_entry = mk_entry(form, width=24, show="●")
+    password_entry.grid(row=1, column=1, sticky=EW, pady=(0, 6))
+
+    Label(form, text="Confirm Password", font=FONT["tag"], bg=T["bg"], fg=T["muted"]).grid(
+        row=2, column=0, sticky=W, pady=(0, 6), padx=(0, 12))
+    confirm_password_entry = mk_entry(form, width=24, show="●")
+    confirm_password_entry.grid(row=2, column=1, sticky=EW, pady=(0, 6))
+
+    status_lbl = Label(edit_section, text="", font=FONT["body"],
+                       bg=T["bg"], fg=T["success"])
+    status_lbl.pack(anchor=W, pady=(4, 0))
+
+    def clear_selection():
+        selected_username.set("")
+        lbl_user.config(text="—")
+        lbl_role.config(text="—")
+        lbl_cdate.config(text="—")
+        lbl_login.config(text="—")
+        role_var.set("Staff")
+        password_entry.delete(0, END)
+        confirm_password_entry.delete(0, END)
+        status_lbl.config(text="")
+
     def load_users():
         for item in tree.get_children():
             tree.delete(item)
@@ -667,6 +765,7 @@ def build_user_management_page(parent):
         users = user_db.get_all_users()
         if not users:
             tree.insert("", END, values=("No users found", "—", "—"))
+            clear_selection()
             return
         for i, (username, ud) in enumerate(users.items()):
             tag = "even" if i % 2 == 0 else "odd"
@@ -676,6 +775,7 @@ def build_user_management_page(parent):
                 ud.get("created_date", "N/A")))
         tree.tag_configure("even", background=T["row_even"])
         tree.tag_configure("odd",  background=T["row_odd"])
+        clear_selection()
 
     def on_select(event):
         sel = tree.selection()
@@ -686,24 +786,77 @@ def build_user_management_page(parent):
         if username == "No users found":
             return
         user_db = get_user_db()
-        ud = user_db.get_all_users().get(username)
+        ud = user_db.get_user(username)
         if ud:
+            selected_username.set(username)
             lbl_user.config(text=username)
             lbl_role.config(text=ud.get("role", "N/A"))
             lbl_cdate.config(text=ud.get("created_date", "N/A"))
             lbl_login.config(text=ud.get("last_login") or "Never")
+            role_var.set(ud.get("role", "Staff"))
+            password_entry.delete(0, END)
+            confirm_password_entry.delete(0, END)
+            status_lbl.config(text="")
+
+    def update_user():
+        username = selected_username.get()
+        if not username:
+            messagebox.showwarning("Warning", "Select a user before updating")
+            return
+
+        role = role_var.get()
+        password = password_entry.get()
+        confirm = confirm_password_entry.get()
+
+        if password or confirm:
+            if password != confirm:
+                messagebox.showerror("Error", "Passwords do not match")
+                return
+            if not validate_password(password):
+                messagebox.showerror("Error", "Password must be at least 6 characters")
+                return
+        else:
+            password = None
+
+        user_db = get_user_db()
+        if user_db.update_user(username, role=role, password=password):
+            status_lbl.config(text=f"User '{username}' updated successfully", fg=T["success"])
+            lbl_role.config(text=role)
+            password_entry.delete(0, END)
+            confirm_password_entry.delete(0, END)
+            load_users()
+        else:
+            messagebox.showerror("Error", "Unable to update user")
+
+    def delete_user():
+        username = selected_username.get()
+        if not username:
+            messagebox.showwarning("Warning", "Select a user before deleting")
+            return
+        if not messagebox.askyesno("Confirm Delete",
+                                   f"Delete user account '{username}'?\nThis cannot be undone."):
+            return
+
+        user_db = get_user_db()
+        if user_db.delete_user(username):
+            messagebox.showinfo("Deleted", f"User '{username}' deleted successfully")
+            clear_selection()
+            load_users()
+        else:
+            messagebox.showerror("Error", "Unable to delete user")
 
     tree.bind("<<TreeviewSelect>>", on_select)
 
     bf = Frame(right, bg=T["panel"])
     bf.pack(fill=X, padx=16, pady=(12, 16), anchor=W)
-    mk_btn(bf, "⟳  Refresh List", load_users, secondary=True, width=14).pack(anchor=W)
+    mk_btn(bf, "Update User", update_user, width=14).pack(side=LEFT, padx=(0, 8))
+    mk_btn(bf, "Delete User", delete_user, danger=True, width=14).pack(side=LEFT, padx=(0, 8))
+    mk_btn(bf, "⟳  Refresh List", load_users, secondary=True, width=14).pack(side=LEFT)
 
     load_users()
     return frame
 
 
-# Display the user management page.
 def open_user_management():
     if 'user_management' not in pages:
         pages['user_management'] = build_user_management_page(page_container)
@@ -863,7 +1016,7 @@ def open_dashboard(user_data):
             refresher()
     show_page('dashboard')
 
-
+'''
 # Build the patient list page showing all registered patients.
 def build_patient_list_page(parent):
     frame = Frame(parent, bg=T["bg"])
@@ -945,7 +1098,7 @@ def open_patient_list():
     else:
         refresh_patient_list()
     show_page('patient_list')
-
+'''
 
 # Create the main application window and navigation layout.
 def create_main_application(user_data):
@@ -1092,7 +1245,6 @@ def create_main_application(user_data):
     db_btn  = nav_btn("Dashboard",            "⊞", lambda: open_dashboard(user_data))
     reg_btn = nav_btn("Patient Registration", "＋", lambda: open_patient_registration(user_data))
     srch_btn= nav_btn("Search Patient",       "⌕", open_search_patient)
-    list_btn= nav_btn("Patient List",         "≡", open_patient_list)
 
     if user_data.get("role") == "Administrator":
         nav_btn("Administration", "", None, section=True)
@@ -1621,7 +1773,30 @@ def open_patient_registration(user_data=None):
 
 # Build the patient search user interface page.
 def build_search_patient_page(parent):
-    frame = Frame(parent, bg=T["bg"])
+    outer = Frame(parent, bg=T["bg"])
+    outer.rowconfigure(0, weight=1)
+    outer.columnconfigure(0, weight=1)
+
+    page_canvas = Canvas(outer, bg=T["bg"], highlightthickness=0)
+    page_scroll = ttk.Scrollbar(outer, orient=VERTICAL, command=page_canvas.yview)
+    page_canvas.configure(yscrollcommand=page_scroll.set)
+    page_canvas.grid(row=0, column=0, sticky=NSEW)
+    page_scroll.grid(row=0, column=1, sticky=NS)
+
+    frame = Frame(page_canvas, bg=T["bg"])
+    canvas_window = page_canvas.create_window((0, 0), window=frame, anchor="nw")
+
+    def _on_frame_configure(event):
+        page_canvas.configure(scrollregion=page_canvas.bbox("all"))
+    def _on_canvas_configure(event):
+        page_canvas.itemconfig(canvas_window, width=event.width)
+
+    frame.bind("<Configure>", _on_frame_configure)
+    page_canvas.bind("<Configure>", _on_canvas_configure)
+    page_canvas.bind("<Enter>", lambda e: page_canvas.bind_all(
+        "<MouseWheel>", lambda ev: page_canvas.yview_scroll(int(-1*(ev.delta/120)), "units")))
+    page_canvas.bind("<Leave>", lambda e: page_canvas.unbind_all("<MouseWheel>"))
+
     frame.rowconfigure(3, weight=1)
     frame.columnconfigure(0, weight=1)
     db = PatientDatabase()
@@ -1699,11 +1874,10 @@ def build_search_patient_page(parent):
     results_tree.column("Email",       width=170, anchor=W,      minwidth=100)
     results_tree.column("Registered",  width=130, anchor=W,      minwidth=80)
 
-
-    results_sb = ttk.Scrollbar(rf, orient=VERTICAL, command=results_tree.yview)
-    results_tree.configure(yscrollcommand=results_sb.set)
-    results_tree.pack(side=LEFT, fill=BOTH, expand=True)
-    results_sb.pack(side=RIGHT, fill=Y)
+    
+    results_tree.pack(fill=BOTH, expand=True)
+    
+    
 
     # ── Edit panel (scrollable) ────────────────────────────────
     edit_card = Frame(frame, bg=T["panel"],
@@ -1763,7 +1937,7 @@ def build_search_patient_page(parent):
             if date and not DateEntry:
                 w.bind("<KeyRelease>", lambda e, x=w: format_birthdate_entry(x))
         return w
-
+    
     patient_id_entry      = ef("Patient ID",    0, 0, readonly=True)
     edit_first_name       = ef("First Name",    0, 2)
     edit_middle_name      = ef("Middle Name",   0, 4)
@@ -1785,6 +1959,7 @@ def build_search_patient_page(parent):
     registered_by_label = Label(edit_frame, text="Registered By: N/A",
                                 font=FONT["small"], bg=T["panel"], fg=T["muted"])
     registered_by_label.grid(row=8, column=0, columnspan=8, sticky=W, pady=(6, 0))
+    
 
     def clear_edit_form():
         selected_patient_id.set("")
@@ -1803,8 +1978,10 @@ def build_search_patient_page(parent):
             edit_birth_date.delete(0, END)
         edit_civil_status_var.set("SINGLE")
         registered_by_label.config(text="Registered By: N/A")
+        
 
 # Load search results into the treeview, handling empty results and formatting data.
+    
     def load_results(patients):
         for item in results_tree.get_children():
             results_tree.delete(item)
@@ -1829,6 +2006,7 @@ def build_search_patient_page(parent):
         results_tree.tag_configure("even", background=T["row_even"])
         results_tree.tag_configure("odd",  background=T["row_odd"])
         results_lbl.config(text=f"RESULTS  ·  {len(patients)} record{'s' if len(patients) != 1 else ''}")
+        
 
 # Search for patient records based on ID or name, and display results.
     def search_patient():
@@ -1868,7 +2046,8 @@ def build_search_patient_page(parent):
         load_results({})
         clear_edit_form()
         results_lbl.config(text="RESULTS")
-
+    
+    
     def load_selected_patient(patient_data):
         clear_edit_form()
         selected_patient_id.set(patient_data.get("patient_id", ""))
@@ -1903,6 +2082,7 @@ def build_search_patient_page(parent):
             edit_birth_date.insert(0, patient_data.get("birth_date", "") or "")
         registered_by_label.config(
             text=f"Registered By: {(patient_data.get('registered_by') or 'N/A').upper()}")
+            
 
     def on_tree_select(event):
         sel = results_tree.selection()
@@ -1916,55 +2096,155 @@ def build_search_patient_page(parent):
         if pd2:
             load_selected_patient(pd2)
 
-    def update_patient():
+    def open_update_popup():
         pid = selected_patient_id.get()
         if not pid:
             messagebox.showwarning("Warning", "Select a patient record before updating")
             return
-        if not edit_first_name.get().strip() or not edit_last_name.get().strip():
-            messagebox.showerror("Error", "First Name and Last Name are required")
-            return
-        if not validate_age(edit_age.get()):
-            messagebox.showerror("Error", "Please enter a valid age (1-149)")
-            return
-        if edit_phone.get().strip() and not validate_phone(edit_phone.get()):
-            messagebox.showerror("Error", "Please enter a valid phone number")
-            return
-        if edit_email.get().strip() and not validate_email(edit_email.get()):
-            messagebox.showerror("Error", "Please enter a valid email address")
-            return
-        bv = edit_birth_date.get().strip()
-        if bv and not validate_date(bv):
-            messagebox.showerror("Error", "Please enter a valid birth date in YYYY-MM-DD format")
+
+        patient_data = db.get_patient(pid)
+        if not patient_data:
+            messagebox.showerror("Error", "Unable to load selected patient record")
             return
 
-        patient_data = {
-            "first_name":      edit_first_name.get().strip().upper(),
-            "middle_name":     edit_middle_name.get().strip().upper(),
-            "last_name":       edit_last_name.get().strip().upper(),
-            "age":             edit_age.get().strip(),
-            "gender":          edit_gender_var.get().upper(),
-            "birth_date":      bv or None,
-            "birth_place":     edit_birth_place.get().strip().upper(),
-            "civil_status":    edit_civil_status_var.get().upper(),
-            "nationality":     edit_nationality.get().strip().upper(),
-            "phone":           edit_phone.get().strip().upper(),
-            "email":           edit_email.get().strip().upper(),
-            "address":         edit_address.get().strip().upper(),
-            "medical_history": edit_medical_history.get().strip().upper()
-        }
+        popup = Toplevel(frame)
+        popup.title(f"Update Patient {pid}")
+        popup.configure(bg=T["bg"])
+        popup.transient(frame.winfo_toplevel())
+        popup.grab_set()
+        popup.minsize(760, 520)
 
-        if db.update_patient(pid, patient_data):
-            messagebox.showinfo("Success", f"Patient {pid} updated successfully")
-            if search_entry.get().strip():
-                search_patient()
+        header = Frame(popup, bg=T["bg"])
+        header.pack(fill=X, padx=16, pady=(12, 6))
+        Label(header, text=f"Update Patient {pid}", font=("Arial", 16, "bold"),
+              bg=T["bg"], fg=T["text"]).pack(anchor=W)
+        Label(header, text="Edit patient details in a dedicated popup window.",
+              font=FONT["small"], bg=T["bg"], fg=T["muted"]).pack(anchor=W, pady=(2, 0))
+
+        body = Frame(popup, bg=T["panel"], highlightthickness=1,
+                     highlightbackground=T["border"])
+        body.pack(fill=BOTH, expand=True, padx=16, pady=(0, 12))
+        for ci in (0, 2, 4, 6):
+            body.columnconfigure(ci, weight=1)
+
+        def pf(label, row, col=0, combo_var=None, combo_vals=None, date=False):
+            Label(body, text=label.upper(), font=FONT["tag"], bg=T["panel"],
+                  fg=T["muted"]).grid(row=row*2, column=col, sticky=W,
+                                        pady=(10, 4), padx=(0 if col == 0 else 12, 6))
+            if combo_var and combo_vals:
+                w = mk_combo(body, combo_var, combo_vals, width=20)
+                w.grid(row=row*2+1, column=col, sticky=EW, ipady=5,
+                       padx=(0 if col == 0 else 12, 12))
+            elif date and DateEntry:
+                w = DateEntry(body, width=20, date_pattern="yyyy-mm-dd", font=FONT["body"],
+                              background=T["accent"], foreground=T["white"],
+                              headersbackground=T["accent"])
+                w.grid(row=row*2+1, column=col, sticky=EW,
+                       padx=(0 if col == 0 else 12, 12), pady=(0, 2))
             else:
-                load_results({})
-            for key in ("patient_list", "dashboard"):
-                r = page_refreshers.get(key)
-                if r: r()
-        else:
-            messagebox.showerror("Error", "Unable to update patient record")
+                w = mk_entry(body, width=20)
+                w.grid(row=row*2+1, column=col, sticky=EW, ipady=6,
+                       padx=(0 if col == 0 else 12, 12), pady=(0, 2))
+                w.bind("<KeyRelease>", lambda e, x=w: uppercase_entry_widget(x))
+            return w
+
+        popup_first_name      = pf("First Name", 0, 0)
+        popup_middle_name     = pf("Middle Name", 0, 2)
+        popup_last_name       = pf("Last Name", 0, 4)
+        popup_age             = pf("Age", 1, 0)
+        popup_gender_var      = StringVar(value=(patient_data.get("gender") or "MALE").upper())
+        popup_gender          = pf("Gender", 1, 2, combo_var=popup_gender_var,
+                                   combo_vals=["MALE", "FEMALE", "OTHER"])
+        popup_birth_date      = pf("Birth Date", 1, 4, date=True)
+        popup_birth_place     = pf("Birth Place", 1, 6)
+        popup_civil_status_var= StringVar(value=(patient_data.get("civil_status") or "SINGLE").upper())
+        popup_civil_status    = pf("Civil Status", 2, 0, combo_var=popup_civil_status_var,
+                                   combo_vals=["SINGLE", "MARRIED", "WIDOWED", "DIVORCED"])
+        popup_nationality     = pf("Nationality", 2, 2)
+        popup_phone           = pf("Phone", 2, 4)
+        popup_email           = pf("Email", 2, 6)
+        popup_address         = pf("Address", 3, 0)
+        popup_medical_history = pf("Medical History", 3, 2)
+
+        def populate_popup():
+            for w, key in [
+                (popup_first_name, "first_name"),
+                (popup_middle_name, "middle_name"),
+                (popup_last_name, "last_name"),
+                (popup_age, "age"),
+                (popup_birth_place, "birth_place"),
+                (popup_nationality, "nationality"),
+                (popup_phone, "phone"),
+                (popup_email, "email"),
+                (popup_address, "address"),
+                (popup_medical_history, "medical_history"),
+            ]:
+                w.delete(0, END)
+                w.insert(0, patient_data.get(key, "") or "")
+            if hasattr(popup_birth_date, "set_date"):
+                try:
+                    popup_birth_date.set_date(patient_data.get("birth_date") or datetime.today())
+                except Exception:
+                    popup_birth_date.delete(0, END)
+                    popup_birth_date.insert(0, patient_data.get("birth_date", "") or "")
+            else:
+                popup_birth_date.delete(0, END)
+                popup_birth_date.insert(0, patient_data.get("birth_date", "") or "")
+
+        populate_popup()
+
+        def save_popup_changes():
+            if not popup_first_name.get().strip() or not popup_last_name.get().strip():
+                messagebox.showerror("Error", "First Name and Last Name are required", parent=popup)
+                return
+            if not validate_age(popup_age.get()):
+                messagebox.showerror("Error", "Please enter a valid age (1-149)", parent=popup)
+                return
+            if popup_phone.get().strip() and not validate_phone(popup_phone.get()):
+                messagebox.showerror("Error", "Please enter a valid phone number", parent=popup)
+                return
+            if popup_email.get().strip() and not validate_email(popup_email.get()):
+                messagebox.showerror("Error", "Please enter a valid email address", parent=popup)
+                return
+            bv = popup_birth_date.get().strip()
+            if bv and not validate_date(bv):
+                messagebox.showerror("Error", "Please enter a valid birth date in YYYY-MM-DD format", parent=popup)
+                return
+
+            updated_data = {
+                "first_name":      popup_first_name.get().strip().upper(),
+                "middle_name":     popup_middle_name.get().strip().upper(),
+                "last_name":       popup_last_name.get().strip().upper(),
+                "age":             popup_age.get().strip(),
+                "gender":          popup_gender_var.get().upper(),
+                "birth_date":      bv or None,
+                "birth_place":     popup_birth_place.get().strip().upper(),
+                "civil_status":    popup_civil_status_var.get().upper(),
+                "nationality":     popup_nationality.get().strip().upper(),
+                "phone":           popup_phone.get().strip().upper(),
+                "email":           popup_email.get().strip().upper(),
+                "address":         popup_address.get().strip().upper(),
+                "medical_history": popup_medical_history.get().strip().upper()
+            }
+
+            if db.update_patient(pid, updated_data):
+                messagebox.showinfo("Success", f"Patient {pid} updated successfully", parent=popup)
+                load_selected_patient(db.get_patient(pid))
+                if search_entry.get().strip():
+                    search_patient()
+                else:
+                    load_results({})
+                for key in ("patient_list", "dashboard"):
+                    r = page_refreshers.get(key)
+                    if r: r()
+                popup.destroy()
+            else:
+                messagebox.showerror("Error", "Unable to update patient record", parent=popup)
+
+        btn_row = Frame(popup, bg=T["bg"])
+        btn_row.pack(fill=X, padx=16, pady=(0, 16))
+        mk_btn(btn_row, "Save Changes", save_popup_changes, width=16).pack(side=LEFT, padx=(0, 8))
+        mk_btn(btn_row, "Cancel", popup.destroy, secondary=True, width=12).pack(side=LEFT)
 
     def delete_patient():
         pid = selected_patient_id.get()
@@ -1992,12 +2272,12 @@ def build_search_patient_page(parent):
     # Action buttons
     af = Frame(edit_card, bg=T["panel"])
     af.pack(fill=X, padx=20, pady=(0, 16))
-    mk_btn(af, "Update Record", update_patient, width=16).pack(side=LEFT, padx=(0, 8))
+    mk_btn(af, "Update Record", open_update_popup, width=16).pack(side=LEFT, padx=(0, 8))
     mk_btn(af, "Delete Record", delete_patient, danger=True, width=14).pack(side=LEFT, padx=(0, 8))
     mk_btn(af, "Clear Form",    clear_edit_form, secondary=True, width=12).pack(side=LEFT)
 
     load_results({})
-    return frame
+    return outer
 
 
 # Open the patient search page.
