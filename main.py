@@ -7,15 +7,13 @@ from datetime import datetime
 import re
 import hashlib
 import mysql.connector
+
 # FORCE PYINSTALLER TO TRACK THE AUTHENTICATION PLUGINS
 from mysql.connector.plugins import mysql_native_password
 from mysql.connector.plugins import caching_sha2_password
 from mysql.connector import Error
 
-try:
-    from tkcalendar import DateEntry
-except ImportError:
-    DateEntry = None
+from tkcalendar import DateEntry
 
 
 def resource_path(relative_path):
@@ -30,10 +28,10 @@ def resource_path(relative_path):
 class DatabaseConnection:
     # Initialize the instance.
     def __init__(self):
-        self.host = "localhost"
-        self.database = "his_db"
-        self.user = "root"
-        self.password = ""
+        self.host = os.getenv("DB_HOST", "192.168.1.88")
+        self.database = os.getenv("DB_NAME", "his_db")
+        self.user = os.getenv("DB_USER", "root")
+        self.password = os.getenv("DB_PASSWORD", "root")
         self.connection = None
 
 
